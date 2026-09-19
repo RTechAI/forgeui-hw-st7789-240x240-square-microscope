@@ -2,7 +2,7 @@
 
 ForgeUI MicroScope V1 is a physically tested miniature instrumentation and graphics showcase for an ESP32-S3 DevKitC-1, a 1.54-inch ST7789 square SPI TFT at its native 240×240 resolution, and an analogue joystick with push switch. It builds on the physically proven ForgeUI ST7789 240×240 square-display baseline.
 
-![Temporary physical evidence: ForgeUI MicroScope SCOPE mode on the tested hardware](Splash2.png)
+![ForgeUI MicroScope XY/Lissajous mode physically running on the tested ST7789 hardware](splash10-st7789-240x240.png)
 
 ## Important: V1 uses simulated signals
 
@@ -10,14 +10,14 @@ ForgeUI MicroScope V1 is a physically tested miniature instrumentation and graph
 
 ## Physical graphics pass
 
-MicroScope has been physically run on the stated ESP32-S3 and ST7789 hardware.
+MicroScope has been physically run on the stated ESP32-S3 and ST7789 hardware. Current daylight photography physically demonstrates MicroScope startup/self-test, SCOPE rendering, SPECTRUM rendering, and XY/Lissajous rendering.
 
 - Firmware build and flash: PASS
 - ST7789 initialisation and full 240×240 rendering: PASS
 - Joystick input: operational
 - ForgeUI MicroScope graphics, graticule, animated traces, and instrumentation readouts: physically rendered
 
-The current night photographs are temporary physical evidence; improved daylight photographs will be added later.
+![ForgeUI MicroScope startup/self-test physically rendered on the ST7789 hardware](splash0-st7789-240x240.png)
 
 ## Instrument modes
 
@@ -29,13 +29,17 @@ SCOPE renders an internally generated sine, square, triangle, or noisy waveform.
 
 The frequency, Vpp, and RMS values correspond to the simulated/generated source; they are not measurements of an external signal.
 
+![ForgeUI MicroScope SCOPE mode physically rendered on the ST7789 hardware](splash2-st7789-240x240.png)
+
 ### SPECTRUM
 
 SPECTRUM is a **simulated/generated spectrum visualisation**, not an FFT. It renders 32 generated spectrum bins with simulated harmonic content, an animated noise floor, peak-hold markers, and a dominant-bin cursor. Its peak-frequency and amplitude readouts correspond to the generated source.
 
+![ForgeUI MicroScope generated SPECTRUM mode physically rendered on the ST7789 hardware](splash6-st7789-240x240.png)
+
 ### XY / Lissajous
 
-XY renders a source-verified animated XY/Lissajous-style trace with a graticule, centre reference, phase readout, and ratio readout. Current photos do not yet provide physical photographic proof of XY mode.
+XY renders a source-verified animated XY/Lissajous-style trace with a graticule, centre reference, phase readout, and ratio readout. The hero photograph above provides daylight physical evidence of XY/Lissajous mode on the tested hardware.
 
 ## Controls
 
@@ -112,9 +116,10 @@ pio device monitor
 
 | Image | Use |
 | --- | --- |
-| [Splash1.png](Splash1.png) | Temporary physical SPECTRUM-mode evidence |
-| [Splash2.png](Splash2.png) | Temporary physical SCOPE-mode evidence and README hero |
-| [Splash3.png](Splash3.png) | Additional temporary physical SCOPE-mode evidence |
+| [splash0-st7789-240x240.png](splash0-st7789-240x240.png) | Daylight physical startup/self-test evidence |
+| [splash2-st7789-240x240.png](splash2-st7789-240x240.png) | Daylight physical SCOPE-mode evidence |
+| [splash6-st7789-240x240.png](splash6-st7789-240x240.png) | Daylight physical generated-SPECTRUM evidence |
+| [splash10-st7789-240x240.png](splash10-st7789-240x240.png) | Daylight physical XY/Lissajous-mode evidence and README hero |
 | [splash-st7789-240x240-square.png](splash-st7789-240x240-square.png) | Supporting golden ST7789 display bring-up evidence only; not MicroScope evidence |
 
 ## Golden hardware reference and ForgeUI
