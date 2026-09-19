@@ -1,6 +1,8 @@
 # ForgeUI MicroScope — ESP32-S3 + ST7789 240×240
 
-ForgeUI MicroScope V1 is a physically tested miniature instrumentation and graphics showcase for an ESP32-S3 DevKitC-1, a 1.54-inch ST7789 square SPI TFT at its native 240×240 resolution, and an analogue joystick with push switch. It builds on the physically proven ForgeUI ST7789 240×240 square-display baseline.
+ForgeUI MicroScope V1 is an official ForgeUI Hardware Lab project: a physically tested miniature instrumentation and graphics showcase for an ESP32-S3 DevKitC-1, 1.54-inch ST7789 240×240 SPI TFT, and analogue joystick. It demonstrates SCOPE, generated SPECTRUM, and XY/Lissajous graphics using internally generated/simulated signals.
+
+ForgeUI is developed by [RTechAI](https://github.com/RTechAI), and this repository is part of the wider ForgeUI ESP32 project ecosystem. Hardware Lab validation does not by itself mean this target is currently integrated into ForgeUI Studio.
 
 ![ForgeUI MicroScope XY/Lissajous mode physically running on the tested ST7789 hardware](splash10-st7789-240x240.png)
 
@@ -39,7 +41,7 @@ SPECTRUM is a **simulated/generated spectrum visualisation**, not an FFT. It ren
 
 ### XY / Lissajous
 
-XY renders a source-verified animated XY/Lissajous-style trace with a graticule, centre reference, phase readout, and ratio readout. The hero photograph above provides daylight physical evidence of XY/Lissajous mode on the tested hardware.
+XY renders an internally generated animated XY/Lissajous-style trace with a graticule, centre reference, phase readout, and ratio readout. The hero photograph above provides daylight physical evidence of XY/Lissajous mode on the tested hardware.
 
 ## Controls
 
@@ -120,13 +122,22 @@ pio device monitor
 | [splash2-st7789-240x240.png](splash2-st7789-240x240.png) | Daylight physical SCOPE-mode evidence |
 | [splash6-st7789-240x240.png](splash6-st7789-240x240.png) | Daylight physical generated-SPECTRUM evidence |
 | [splash10-st7789-240x240.png](splash10-st7789-240x240.png) | Daylight physical XY/Lissajous-mode evidence and README hero |
-| [splash-st7789-240x240-square.png](splash-st7789-240x240-square.png) | Supporting golden ST7789 display bring-up evidence only; not MicroScope evidence |
 
 ## Golden hardware reference and ForgeUI
 
 [forgeui-hw-st7789-240x240-square](https://github.com/RTechAI/forgeui-hw-st7789-240x240-square) is the golden ForgeUI hardware reference for this physically proven square-display configuration. MicroScope is an application/showcase built on that baseline.
 
-This project is part of the [ForgeUI](https://forgeui.co.nz) Hardware Lab. [ForgeUI Studio](https://studio.forgeui.co.nz) provides the broader ForgeUI interface-design context.
+## ForgeUI Hardware Lab
+
+ForgeUI Hardware Lab is an [RTechAI](https://github.com/RTechAI)/[ForgeUI](https://forgeui.co.nz) collection of physically tested ESP32 boards, displays, peripherals, examples, and experimental projects. It preserves reproducible hardware baselines through hardware identification, minimal bring-up, physical proof, and known-good configurations, then evaluates demonstrations and candidate targets for potential ForgeUI Studio workflows.
+
+Physical validation of this ESP32-S3/ST7789 target does not itself indicate current ForgeUI Studio integration or direct support.
+
+## Related ForgeUI Projects
+
+- [Golden ST7789 240×240 Square Display](https://github.com/RTechAI/forgeui-hw-st7789-240x240-square) — known-good ESP32-S3/ST7789 physical hardware baseline.
+- [ForgeUI MicroAsteroids](https://github.com/RTechAI/forgeui-hw-st7789-240x240-square-microasteroids) — joystick-controlled arcade and graphics showcase.
+- [ForgeUI MicroPilot](https://github.com/RTechAI/forgeui-hw-st7789-240x240-square-micropilot) — joystick-controlled PFD/glass-cockpit graphics showcase.
 
 ## Attribution and license
 
@@ -139,6 +150,10 @@ ForgeUI-authored repository content is released under the [MIT License](LICENSE)
 ## Future work
 
 A future version may investigate a safe external ADC-input direction. That work is not implemented in MicroScope V1.
+
+## About ForgeUI
+
+[ForgeUI](https://forgeui.co.nz) is developed by [RTechAI](https://github.com/RTechAI). [ForgeUI Hosted Studio](https://studio.forgeui.co.nz) is a visual embedded UI/HMI development environment for supported ESP32 hardware. ForgeUI Hosted Studio is available for public registration. ForgeUI Hardware Lab is the associated physically tested hardware, reference, and project collection, preserving reproducible physical evidence while evaluating hardware and examples for ForgeUI workflows.
 
 ## Known future wording correction
 
