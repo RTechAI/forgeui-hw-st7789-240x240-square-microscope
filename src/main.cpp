@@ -3,9 +3,23 @@
 #include <math.h>
 
 // ============================================================
-// ForgeUI MicroPilot
+// ForgeUI MicroScope
 // ESP32-S3 + ST7789 240x240 + Analog Joystick
-// Miniature animated Primary Flight Display
+//
+// V1 simulated instrumentation:
+//   SCOPE -> SPECTRUM -> XY / LISSAJOUS
+//
+// Joystick:
+//   X  GPIO6
+//   Y  GPIO5
+//   SW GPIO4
+//
+// Display:
+//   CS  GPIO8
+//   DC  GPIO9
+//   RST GPIO10
+//   MOSI GPIO11
+//   SCLK GPIO12
 // ============================================================
 
 // ---------------- Display -----------------------------------
@@ -37,7 +51,6 @@ Arduino_GFX *gfx = new Arduino_ST7789(
     SCREEN_H
 );
 
-// Full-screen off-screen canvas
 Arduino_Canvas *canvas = nullptr;
 
 // ---------------- Joystick ----------------------------------
@@ -51,60 +64,87 @@ int joyCentreY = 2048;
 
 // ---------------- Colours -----------------------------------
 
-constexpr uint16_t C_BLACK      = 0x0000;
-constexpr uint16_t C_WHITE      = 0xFFFF;
-constexpr uint16_t C_CYAN       = 0x07FF;
-constexpr uint16_t C_BLUE       = 0x001F;
-constexpr uint16_t C_GREEN      = 0x07E0;
-constexpr uint16_t C_YELLOW     = 0xFFE0;
-constexpr uint16_t C_RED        = 0xF800;
-constexpr uint16_t C_GREY       = 0x8410;
-constexpr uint16_t C_DKGREY     = 0x3186;
+constexpr uint16_t C_BLACK   = 0x0000;
+constexpr uint16_t C_WHITE   = 0xFFFF;
+constexpr uint16_t C_CYAN    = 0x07FF;
+constexpr uint16_t C_BLUE    = 0x001F;
+constexpr uint16_t C_GREEN   = 0x07E0;
+constexpr uint16_t C_YELLOW  = 0xFFE0;
+constexpr uint16_t C_RED     = 0xF800;
+constexpr uint16_t C_MAGENTA = 0xF81F;
+constexpr uint16_t C_GREY    = 0x8410;
+constexpr uint16_t C_DKGREY  = 0x3186;
 
-// PFD colours
-constexpr uint16_t SKY_BLUE     = 0x249F;
-constexpr uint16_t SKY_DARK     = 0x1275;
-constexpr uint16_t GROUND_BROWN = 0x8A82;
-constexpr uint16_t GROUND_DARK  = 0x5140;
-constexpr uint16_t PFD_MAGENTA  = 0xF81F;
+// Instrument-specific shades
+constexpr uint16_t GRID_MAJOR = 0x4208;
+constexpr uint16_t GRID_MINOR = 0x2104;
+constexpr uint16_t TRACE_DIM  = 0x03E0;
 
-// ---------------- Simulation --------------------------------
+// ---------------- Instrument modes --------------------------
 
-float bankDeg = 0.0f;
-float pitchDeg = 0.0f;
+enum InstrumentMode
+{
+    MODE_SCOPE = 0,
+    MODE_SPECTRUM = 1,
+    MODE_XY = 2
+};
 
-float commandedBank = 0.0f;
-float commandedPitch = 0.0f;
+InstrumentMode mode = MODE_SCOPE;
 
-float airspeed = 105.0f;
-float altitude = 2450.0f;
-float verticalSpeed = 0.0f;
-float heading = 270.0f;
+// ---------------- Waveform type -----------------------------
 
-bool autopilot = false;
+enum WaveType
+{
+    WAVE_SINE = 0,
+    WAVE_SQUARE = 1,
+    WAVE_TRIANGLE = 2,
+    WAVE_NOISE = 3
+};
+
+WaveType waveType = WAVE_SINE;
+
+// ---------------- Runtime -----------------------------------
 
 unsigned long lastFrame = 0;
 unsigned long lastButtonTime = 0;
+
+float animationPhase = 0.0f;
+
+// Scope settings
+float voltsPerDiv = 1.0f;
+float timePerDivMs = 1.0f;
+float triggerLevel = 0.0f;
+
+// Simulated signal
+float signalFrequency = 1000.0f;
+float signalAmplitude = 1.25f;
+float signalOffset = 0.0f;
+
+// Spectrum
+constexpr int SPECTRUM_BINS = 32;
+float spectrum[SPECTRUM_BINS];
+float spectrumPeak[SPECTRUM_BINS];
+
+// XY
+float xyPhaseShift = 1.5708f;
+float xyRatio = 1.0f;
 
 // ============================================================
 // Helpers
 // ============================================================
 
-float degToRad(float deg)
+float clampFloat(
+    float value,
+    float minimum,
+    float maximum)
 {
-    return deg * 0.01745329252f;
-}
+    if (value < minimum)
+        return minimum;
 
-float clampFloat(float v, float lo, float hi)
-{
-    if (v < lo) return lo;
-    if (v > hi) return hi;
-    return v;
-}
+    if (value > maximum)
+        return maximum;
 
-float smoothToward(float current, float target, float amount)
-{
-    return current + (target - current) * amount;
+    return value;
 }
 
 bool buttonPressed()
@@ -112,11 +152,14 @@ bool buttonPressed()
     return digitalRead(JOY_SW) == LOW;
 }
 
-float readAxis(int raw, int centre)
+float readAxis(
+    int raw,
+    int centre)
 {
     constexpr int deadZone = 180;
 
-    int delta = raw - centre;
+    int delta =
+        raw - centre;
 
     if (abs(delta) < deadZone)
         return 0.0f;
@@ -125,53 +168,82 @@ float readAxis(int raw, int centre)
 
     if (delta > 0)
     {
-        int range = 4095 - centre - deadZone;
+        int range =
+            4095 -
+            centre -
+            deadZone;
 
         if (range > 0)
+        {
             value =
-                (float)(delta - deadZone) /
+                (float)(
+                    delta -
+                    deadZone
+                ) /
                 (float)range;
+        }
     }
     else
     {
-        int range = centre - deadZone;
+        int range =
+            centre -
+            deadZone;
 
         if (range > 0)
+        {
             value =
-                (float)(delta + deadZone) /
+                (float)(
+                    delta +
+                    deadZone
+                ) /
                 (float)range;
+        }
     }
 
-    return clampFloat(value, -1.0f, 1.0f);
+    return clampFloat(
+        value,
+        -1.0f,
+        1.0f
+    );
 }
 
-// Rotate a point around screen centre.
-//
-// lx / ly = coordinates relative to PFD centre.
-// pitchOffset is applied before rotation.
-void rotatePoint(
-    float lx,
-    float ly,
-    float angle,
-    int &sx,
-    int &sy)
+const char *modeName()
 {
-    float c = cosf(angle);
-    float s = sinf(angle);
+    switch (mode)
+    {
+        case MODE_SCOPE:
+            return "SCOPE";
 
-    sx =
-        (int)(
-            SCREEN_W / 2 +
-            lx * c -
-            ly * s
-        );
+        case MODE_SPECTRUM:
+            return "SPECTRUM";
 
-    sy =
-        (int)(
-            SCREEN_H / 2 +
-            lx * s +
-            ly * c
-        );
+        case MODE_XY:
+            return "XY";
+
+        default:
+            return "?";
+    }
+}
+
+const char *waveName()
+{
+    switch (waveType)
+    {
+        case WAVE_SINE:
+            return "SINE";
+
+        case WAVE_SQUARE:
+            return "SQUARE";
+
+        case WAVE_TRIANGLE:
+            return "TRIANGLE";
+
+        case WAVE_NOISE:
+            return "NOISE";
+
+        default:
+            return "?";
+    }
 }
 
 // ============================================================
@@ -220,35 +292,35 @@ void calibrateJoystick()
 
     centredText(
         "FORGEUI",
-        64,
+        54,
         3,
         C_CYAN
     );
 
     centredText(
-        "MICROPILOT",
-        98,
+        "MICROSCOPE",
+        88,
         2,
         C_WHITE
     );
 
     centredText(
-        "FLIGHT CONTROL",
-        132,
+        "INSTRUMENT CONTROL",
+        122,
         1,
         C_GREY
     );
 
     centredText(
         "CALIBRATING...",
-        154,
+        150,
         1,
         C_GREEN
     );
 
     centredText(
         "RELEASE STICK",
-        178,
+        174,
         1,
         C_YELLOW
     );
@@ -262,13 +334,20 @@ void calibrateJoystick()
 
     for (int i = 0; i < samples; i++)
     {
-        totalX += analogRead(JOY_X);
-        totalY += analogRead(JOY_Y);
+        totalX +=
+            analogRead(JOY_X);
+
+        totalY +=
+            analogRead(JOY_Y);
+
         delay(5);
     }
 
-    joyCentreX = totalX / samples;
-    joyCentreY = totalY / samples;
+    joyCentreX =
+        totalX / samples;
+
+    joyCentreY =
+        totalY / samples;
 
     Serial.printf(
         "Joystick centre X=%d Y=%d\n",
@@ -278,1029 +357,1185 @@ void calibrateJoystick()
 }
 
 // ============================================================
-// Simulation
+// Simulated signal generator
 // ============================================================
 
-void updateFlightModel()
+float triangleWave(float phase)
 {
-    float joyX =
+    float wrapped =
+        fmodf(
+            phase,
+            2.0f * PI
+        );
+
+    if (wrapped < 0)
+        wrapped +=
+            2.0f * PI;
+
+    float normalized =
+        wrapped /
+        (2.0f * PI);
+
+    if (normalized < 0.25f)
+        return normalized * 4.0f;
+
+    if (normalized < 0.75f)
+        return 2.0f -
+               normalized * 4.0f;
+
+    return normalized * 4.0f -
+           4.0f;
+}
+
+float sampleSignal(float phase)
+{
+    float value = 0.0f;
+
+    switch (waveType)
+    {
+        case WAVE_SINE:
+        {
+            value =
+                sinf(phase);
+
+            break;
+        }
+
+        case WAVE_SQUARE:
+        {
+            value =
+                sinf(phase) >= 0.0f
+                    ? 1.0f
+                    : -1.0f;
+
+            break;
+        }
+
+        case WAVE_TRIANGLE:
+        {
+            value =
+                triangleWave(phase);
+
+            break;
+        }
+
+        case WAVE_NOISE:
+        {
+            float sineBase =
+                sinf(phase) * 0.65f;
+
+            float noise =
+                random(-100, 101) /
+                100.0f;
+
+            value =
+                sineBase +
+                noise * 0.35f;
+
+            break;
+        }
+    }
+
+    return
+        signalOffset +
+        value *
+        signalAmplitude;
+}
+
+// ============================================================
+// Shared header
+// ============================================================
+
+void drawHeader()
+{
+    canvas->fillRect(
+        0,
+        0,
+        SCREEN_W,
+        24,
+        C_BLACK
+    );
+
+    canvas->drawFastHLine(
+        0,
+        23,
+        SCREEN_W,
+        C_CYAN
+    );
+
+    canvas->setTextSize(1);
+
+    canvas->setTextColor(C_CYAN);
+    canvas->setCursor(4, 5);
+    canvas->print("FORGEUI");
+
+    canvas->setTextColor(C_WHITE);
+    canvas->setCursor(58, 5);
+    canvas->print("MICROSCOPE");
+
+    canvas->setTextColor(C_GREEN);
+    canvas->setCursor(154, 5);
+    canvas->print(modeName());
+}
+
+// ============================================================
+// Shared footer
+// ============================================================
+
+void drawFooter()
+{
+    canvas->fillRect(
+        0,
+        218,
+        SCREEN_W,
+        22,
+        C_BLACK
+    );
+
+    canvas->drawFastHLine(
+        0,
+        218,
+        SCREEN_W,
+        C_DKGREY
+    );
+
+    canvas->setTextSize(1);
+
+    if (mode == MODE_SCOPE)
+    {
+        canvas->setTextColor(C_CYAN);
+        canvas->setCursor(4, 224);
+        canvas->printf(
+            "%.1fV/D",
+            voltsPerDiv
+        );
+
+        canvas->setTextColor(C_YELLOW);
+        canvas->setCursor(76, 224);
+        canvas->printf(
+            "%.1fms/D",
+            timePerDivMs
+        );
+
+        canvas->setTextColor(C_GREEN);
+        canvas->setCursor(166, 224);
+        canvas->print(waveName());
+    }
+    else if (mode == MODE_SPECTRUM)
+    {
+        canvas->setTextColor(C_CYAN);
+        canvas->setCursor(4, 224);
+        canvas->print("0");
+
+        canvas->setTextColor(C_GREY);
+        canvas->setCursor(98, 224);
+        canvas->print("5kHz");
+
+        canvas->setTextColor(C_CYAN);
+        canvas->setCursor(202, 224);
+        canvas->print("10k");
+    }
+    else
+    {
+        canvas->setTextColor(C_CYAN);
+        canvas->setCursor(4, 224);
+        canvas->printf(
+            "RATIO %.1f",
+            xyRatio
+        );
+
+        canvas->setTextColor(C_MAGENTA);
+        canvas->setCursor(128, 224);
+        canvas->printf(
+            "PH %.0f",
+            xyPhaseShift *
+                57.2958f
+        );
+    }
+}
+
+// ============================================================
+// Instrument graticule
+// ============================================================
+
+void drawGraticule(
+    int left,
+    int top,
+    int right,
+    int bottom)
+{
+    canvas->fillRect(
+        left,
+        top,
+        right - left + 1,
+        bottom - top + 1,
+        C_BLACK
+    );
+
+    canvas->drawRect(
+        left,
+        top,
+        right - left + 1,
+        bottom - top + 1,
+        C_GREY
+    );
+
+    int width =
+        right - left;
+
+    int height =
+        bottom - top;
+
+    // 10 horizontal divisions.
+    for (int i = 1; i < 10; i++)
+    {
+        int x =
+            left +
+            width * i / 10;
+
+        uint16_t colour =
+            i == 5
+                ? GRID_MAJOR
+                : GRID_MINOR;
+
+        canvas->drawFastVLine(
+            x,
+            top + 1,
+            height - 1,
+            colour
+        );
+    }
+
+    // 8 vertical divisions.
+    for (int i = 1; i < 8; i++)
+    {
+        int y =
+            top +
+            height * i / 8;
+
+        uint16_t colour =
+            i == 4
+                ? GRID_MAJOR
+                : GRID_MINOR;
+
+        canvas->drawFastHLine(
+            left + 1,
+            y,
+            width - 1,
+            colour
+        );
+    }
+
+    // Centre cross ticks.
+    int centreX =
+        (left + right) / 2;
+
+    int centreY =
+        (top + bottom) / 2;
+
+    for (int y = top + 6;
+         y < bottom;
+         y += 8)
+    {
+        canvas->drawPixel(
+            centreX,
+            y,
+            C_GREY
+        );
+    }
+
+    for (int x = left + 6;
+         x < right;
+         x += 8)
+    {
+        canvas->drawPixel(
+            x,
+            centreY,
+            C_GREY
+        );
+    }
+}
+
+// ============================================================
+// Joystick-controlled instrument settings
+// ============================================================
+
+void updateControls()
+{
+    float x =
         readAxis(
             analogRead(JOY_X),
             joyCentreX
         );
 
-    float joyY =
+    float y =
         readAxis(
             analogRead(JOY_Y),
             joyCentreY
         );
 
-    if (autopilot)
+    if (mode == MODE_SCOPE)
     {
-        // Wings level / zero pitch.
-        commandedBank = 0.0f;
-        commandedPitch = 0.0f;
+        // Horizontal stick adjusts timebase.
+        if (x > 0.65f)
+            timePerDivMs = 2.0f;
+        else if (x > 0.20f)
+            timePerDivMs = 1.0f;
+        else if (x < -0.65f)
+            timePerDivMs = 0.25f;
+        else if (x < -0.20f)
+            timePerDivMs = 0.5f;
+
+        // Vertical stick adjusts volts/div.
+        if (y > 0.65f)
+            voltsPerDiv = 2.0f;
+        else if (y > 0.20f)
+            voltsPerDiv = 1.0f;
+        else if (y < -0.65f)
+            voltsPerDiv = 0.25f;
+        else if (y < -0.20f)
+            voltsPerDiv = 0.5f;
+    }
+    else if (mode == MODE_SPECTRUM)
+    {
+        // Spectrum mode uses joystick to alter simulated source.
+        signalFrequency +=
+            x * 35.0f;
+
+        signalFrequency =
+            clampFloat(
+                signalFrequency,
+                250.0f,
+                8000.0f
+            );
+
+        signalAmplitude +=
+            -y * 0.015f;
+
+        signalAmplitude =
+            clampFloat(
+                signalAmplitude,
+                0.35f,
+                2.0f
+            );
     }
     else
     {
-        commandedBank =
-            joyX * 55.0f;
+        // XY mode:
+        // X adjusts phase, Y adjusts frequency ratio.
+        xyPhaseShift +=
+            x * 0.025f;
 
-        // Physical joystick forward is normally negative ADC delta.
-        commandedPitch =
-            -joyY * 25.0f;
-    }
-
-    // Smooth aircraft response.
-    bankDeg =
-        smoothToward(
-            bankDeg,
-            commandedBank,
-            autopilot ? 0.075f : 0.10f
-        );
-
-    pitchDeg =
-        smoothToward(
-            pitchDeg,
-            commandedPitch,
-            autopilot ? 0.065f : 0.085f
-        );
-
-    // Simulated heading changes with bank.
-    heading += bankDeg * 0.0025f;
-
-    while (heading >= 360.0f)
-        heading -= 360.0f;
-
-    while (heading < 0.0f)
-        heading += 360.0f;
-
-    // Vertical speed responds to pitch.
-    float targetVS =
-        pitchDeg * 65.0f;
-
-    verticalSpeed =
-        smoothToward(
-            verticalSpeed,
-            targetVS,
-            0.035f
-        );
-
-    altitude +=
-        verticalSpeed / 1800.0f;
-
-    if (altitude < 0)
-        altitude = 0;
-
-    // Airspeed changes gently with pitch.
-    float targetSpeed =
-        110.0f -
-        pitchDeg * 0.45f;
-
-    targetSpeed =
-        clampFloat(
-            targetSpeed,
-            65.0f,
-            165.0f
-        );
-
-    airspeed =
-        smoothToward(
-            airspeed,
-            targetSpeed,
-            0.025f
-        );
-}
-
-// ============================================================
-// Horizon background
-// ============================================================
-
-void drawHorizonBackground()
-{
-    // First draw full sky.
-    canvas->fillScreen(SKY_BLUE);
-
-    float bank =
-        degToRad(bankDeg);
-
-    // Pitch scale:
-    // 3 pixels per degree gives ±25 degrees plenty of movement.
-    float pitchPixels =
-        pitchDeg * 3.0f;
-
-    // Horizon line equation in screen space.
-    //
-    // Instead of rotating an enormous bitmap, calculate the horizon
-    // Y position for each screen column and fill ground below it.
-    float slope =
-        tanf(bank);
-
-    for (int x = 0; x < SCREEN_W; x++)
-    {
-        float relativeX =
-            x - SCREEN_W / 2.0f;
-
-        float horizonY =
-            SCREEN_H / 2.0f +
-            pitchPixels +
-            relativeX * slope;
-
-        int y =
-            (int)horizonY;
-
-        if (y < 0)
+        if (xyPhaseShift >
+            2.0f * PI)
         {
-            canvas->drawFastVLine(
-                x,
-                0,
-                SCREEN_H,
-                GROUND_BROWN
+            xyPhaseShift -=
+                2.0f * PI;
+        }
+
+        if (xyPhaseShift < 0)
+        {
+            xyPhaseShift +=
+                2.0f * PI;
+        }
+
+        xyRatio +=
+            -y * 0.006f;
+
+        xyRatio =
+            clampFloat(
+                xyRatio,
+                0.5f,
+                2.0f
             );
-        }
-        else if (y < SCREEN_H)
-        {
-            canvas->drawFastVLine(
-                x,
-                y,
-                SCREEN_H - y,
-                GROUND_BROWN
-            );
-        }
-    }
-
-    // Horizon itself.
-    int hx1;
-    int hy1;
-    int hx2;
-    int hy2;
-
-    rotatePoint(
-        -170,
-        pitchPixels,
-        bank,
-        hx1,
-        hy1
-    );
-
-    rotatePoint(
-        170,
-        pitchPixels,
-        bank,
-        hx2,
-        hy2
-    );
-
-    canvas->drawLine(
-        hx1,
-        hy1,
-        hx2,
-        hy2,
-        C_WHITE
-    );
-}
-
-// ============================================================
-// Pitch ladder
-// ============================================================
-
-void drawPitchLadder()
-{
-    float bank =
-        degToRad(bankDeg);
-
-    constexpr float pixelsPerDegree = 3.0f;
-
-    // Draw -30 to +30 degree ladder.
-    for (int mark = -30; mark <= 30; mark += 5)
-    {
-        if (mark == 0)
-            continue;
-
-        float localY =
-            (pitchDeg - mark) *
-            pixelsPerDegree;
-
-        int halfWidth =
-            (mark % 10 == 0)
-                ? 25
-                : 14;
-
-        int x1;
-        int y1;
-        int x2;
-        int y2;
-
-        rotatePoint(
-            -halfWidth,
-            localY,
-            bank,
-            x1,
-            y1
-        );
-
-        rotatePoint(
-            halfWidth,
-            localY,
-            bank,
-            x2,
-            y2
-        );
-
-        // Skip lines that are completely well outside display.
-        if ((y1 < -20 && y2 < -20) ||
-            (y1 > SCREEN_H + 20 &&
-             y2 > SCREEN_H + 20))
-        {
-            continue;
-        }
-
-        canvas->drawLine(
-            x1,
-            y1,
-            x2,
-            y2,
-            C_WHITE
-        );
-
-        // Small end ticks.
-        float tickDirection =
-            mark > 0
-                ? 4.0f
-                : -4.0f;
-
-        int tx1;
-        int ty1;
-        int tx2;
-        int ty2;
-
-        rotatePoint(
-            -halfWidth,
-            localY + tickDirection,
-            bank,
-            tx1,
-            ty1
-        );
-
-        rotatePoint(
-            halfWidth,
-            localY + tickDirection,
-            bank,
-            tx2,
-            ty2
-        );
-
-        canvas->drawLine(
-            x1,
-            y1,
-            tx1,
-            ty1,
-            C_WHITE
-        );
-
-        canvas->drawLine(
-            x2,
-            y2,
-            tx2,
-            ty2,
-            C_WHITE
-        );
     }
 }
 
 // ============================================================
-// Fixed aircraft symbol
+// Mode button
 // ============================================================
 
-void drawAircraftSymbol()
+void updateModeButton()
 {
-    constexpr int cx = SCREEN_W / 2;
-    constexpr int cy = SCREEN_H / 2;
+    static bool previousButton = false;
 
-    // Black outline for readability.
-    canvas->drawFastHLine(
-        cx - 42,
-        cy,
-        28,
-        C_BLACK
-    );
+    bool currentButton =
+        buttonPressed();
 
-    canvas->drawFastHLine(
-        cx + 14,
-        cy,
-        28,
-        C_BLACK
-    );
+    bool edge =
+        currentButton &&
+        !previousButton;
 
-    // Yellow wings.
-    canvas->drawFastHLine(
-        cx - 40,
-        cy,
-        26,
-        C_YELLOW
-    );
+    previousButton =
+        currentButton;
 
-    canvas->drawFastHLine(
-        cx + 14,
-        cy,
-        26,
-        C_YELLOW
-    );
+    if (!edge)
+        return;
 
-    canvas->drawFastVLine(
-        cx - 14,
-        cy,
-        7,
-        C_YELLOW
-    );
-
-    canvas->drawFastVLine(
-        cx + 14,
-        cy,
-        7,
-        C_YELLOW
-    );
-
-    // Centre reference.
-    canvas->drawCircle(
-        cx,
-        cy,
-        4,
-        C_YELLOW
-    );
-
-    canvas->fillCircle(
-        cx,
-        cy,
-        1,
-        C_WHITE
-    );
-}
-// ============================================================
-// Roll scale
-// ============================================================
-
-void drawRollScale()
-{
-    constexpr int cx = SCREEN_W / 2;
-    constexpr int cy = 92;
-    constexpr int radius = 74;
-
-    // Fixed roll marks across the top.
-    const int marks[] =
-    {
-        -60, -45, -30, -20, -10,
-         0,
-         10, 20, 30, 45, 60
-    };
-
-    constexpr int markCount =
-        sizeof(marks) / sizeof(marks[0]);
-
-    for (int i = 0; i < markCount; i++)
-    {
-        float angle =
-            degToRad(
-                marks[i] - 90.0f
-            );
-
-        int innerRadius =
-            (marks[i] % 30 == 0)
-                ? radius - 9
-                : radius - 5;
-
-        int x1 =
-            cx +
-            cosf(angle) *
-            innerRadius;
-
-        int y1 =
-            cy +
-            sinf(angle) *
-            innerRadius;
-
-        int x2 =
-            cx +
-            cosf(angle) *
-            radius;
-
-        int y2 =
-            cy +
-            sinf(angle) *
-            radius;
-
-        canvas->drawLine(
-            x1,
-            y1,
-            x2,
-            y2,
-            C_WHITE
-        );
-    }
-
-    // Fixed centre triangle.
-    canvas->fillTriangle(
-        cx,
-        cy - radius + 1,
-        cx - 5,
-        cy - radius + 9,
-        cx + 5,
-        cy - radius + 9,
-        C_WHITE
-    );
-
-    // Moving bank pointer.
-    float pointerAngle =
-        degToRad(
-            bankDeg - 90.0f
-        );
-
-    int px =
-        cx +
-        cosf(pointerAngle) *
-        (radius - 14);
-
-    int py =
-        cy +
-        sinf(pointerAngle) *
-        (radius - 14);
-
-    int lx =
-        cx +
-        cosf(pointerAngle - 0.07f) *
-        (radius - 22);
-
-    int ly =
-        cy +
-        sinf(pointerAngle - 0.07f) *
-        (radius - 22);
-
-    int rx =
-        cx +
-        cosf(pointerAngle + 0.07f) *
-        (radius - 22);
-
-    int ry =
-        cy +
-        sinf(pointerAngle + 0.07f) *
-        (radius - 22);
-
-    canvas->fillTriangle(
-        px,
-        py,
-        lx,
-        ly,
-        rx,
-        ry,
-        C_YELLOW
-    );
-}
-
-// ============================================================
-// Airspeed tape
-// ============================================================
-
-void drawAirspeedTape()
-{
-    constexpr int x = 0;
-    constexpr int y = 34;
-    constexpr int w = 42;
-    constexpr int h = 164;
-
-    canvas->fillRect(
-        x,
-        y,
-        w,
-        h,
-        C_BLACK
-    );
-
-    canvas->drawRect(
-        x,
-        y,
-        w,
-        h,
-        C_GREY
-    );
-
-    // Moving scale.
-    int centreSpeed =
-        (int)airspeed;
-
-    for (int value =
-             centreSpeed - 50;
-         value <=
-             centreSpeed + 50;
-         value += 10)
-    {
-        float delta =
-            value - airspeed;
-
-        int py =
-            116 -
-            (int)(delta * 2.0f);
-
-        if (py < y + 5 ||
-            py > y + h - 5)
-        {
-            continue;
-        }
-
-        int tick =
-            (value % 20 == 0)
-                ? 10
-                : 6;
-
-        canvas->drawFastHLine(
-            w - tick,
-            py,
-            tick,
-            C_WHITE
-        );
-
-        if (value % 20 == 0 &&
-            value >= 0)
-        {
-            char text[8];
-
-            snprintf(
-                text,
-                sizeof(text),
-                "%d",
-                value
-            );
-
-            canvas->setTextSize(1);
-            canvas->setTextColor(C_WHITE);
-            canvas->setCursor(
-                3,
-                py - 3
-            );
-            canvas->print(text);
-        }
-    }
-
-    // Current airspeed box.
-    canvas->fillRect(
-        0,
-        105,
-        42,
-        23,
-        C_BLACK
-    );
-
-    canvas->drawRect(
-        0,
-        105,
-        42,
-        23,
-        C_CYAN
-    );
-
-    char current[8];
-
-    snprintf(
-        current,
-        sizeof(current),
-        "%03d",
-        (int)airspeed
-    );
-
-    canvas->setTextSize(2);
-    canvas->setTextColor(C_WHITE);
-    canvas->setCursor(
-        3,
-        109
-    );
-    canvas->print(current);
-
-    canvas->setTextSize(1);
-    canvas->setTextColor(C_CYAN);
-    canvas->setCursor(
-        4,
-        23
-    );
-    canvas->print("IAS");
-}
-
-// ============================================================
-// Altitude tape
-// ============================================================
-
-void drawAltitudeTape()
-{
-    constexpr int x = 198;
-    constexpr int y = 34;
-    constexpr int w = 42;
-    constexpr int h = 164;
-
-    canvas->fillRect(
-        x,
-        y,
-        w,
-        h,
-        C_BLACK
-    );
-
-    canvas->drawRect(
-        x,
-        y,
-        w,
-        h,
-        C_GREY
-    );
-
-    int centreAltitude =
-        ((int)altitude / 100) * 100;
-
-    for (int value =
-             centreAltitude - 500;
-         value <=
-             centreAltitude + 500;
-         value += 100)
-    {
-        float delta =
-            value - altitude;
-
-        int py =
-            116 -
-            (int)(delta * 0.20f);
-
-        if (py < y + 5 ||
-            py > y + h - 5)
-        {
-            continue;
-        }
-
-        int tick =
-            (value % 200 == 0)
-                ? 10
-                : 6;
-
-        canvas->drawFastHLine(
-            x,
-            py,
-            tick,
-            C_WHITE
-        );
-
-        if (value % 200 == 0 &&
-            value >= 0)
-        {
-            char text[8];
-
-            snprintf(
-                text,
-                sizeof(text),
-                "%d",
-                value
-            );
-
-            canvas->setTextSize(1);
-            canvas->setTextColor(C_WHITE);
-
-            canvas->setCursor(
-                x + 12,
-                py - 3
-            );
-
-            canvas->print(text);
-        }
-    }
-
-    // Current altitude box.
-    canvas->fillRect(
-        x,
-        105,
-        w,
-        23,
-        C_BLACK
-    );
-
-    canvas->drawRect(
-        x,
-        105,
-        w,
-        23,
-        C_GREEN
-    );
-
-    char current[10];
-
-    snprintf(
-        current,
-        sizeof(current),
-        "%04d",
-        (int)altitude
-    );
-
-    canvas->setTextSize(1);
-    canvas->setTextColor(C_WHITE);
-
-    canvas->setCursor(
-        x + 6,
-        113
-    );
-
-    canvas->print(current);
-
-    canvas->setTextColor(C_GREEN);
-    canvas->setCursor(
-        213,
-        23
-    );
-    canvas->print("ALT");
-}
-
-// ============================================================
-// Vertical speed indicator
-// ============================================================
-
-void drawVerticalSpeed()
-{
-    constexpr int x = 190;
-    constexpr int centreY = 116;
-
-    canvas->drawFastVLine(
-        x,
-        62,
-        108,
-        C_GREY
-    );
-
-    canvas->drawFastHLine(
-        x - 4,
-        centreY,
-        8,
-        C_WHITE
-    );
-
-    float normalized =
-        clampFloat(
-            verticalSpeed / 1800.0f,
-            -1.0f,
-            1.0f
-        );
-
-    int pointerY =
-        centreY -
-        (int)(normalized * 48.0f);
-
-    canvas->fillTriangle(
-        x,
-        pointerY,
-        x - 7,
-        pointerY - 4,
-        x - 7,
-        pointerY + 4,
-        C_GREEN
-    );
-
-    canvas->setTextSize(1);
-    canvas->setTextColor(C_GREY);
-
-    canvas->setCursor(
-        181,
-        51
-    );
-    canvas->print("+");
-
-    canvas->setCursor(
-        181,
-        172
-    );
-    canvas->print("-");
-}
-
-// ============================================================
-// Heading strip
-// ============================================================
-
-void drawHeadingStrip()
-{
-    constexpr int y = 202;
-    constexpr int h = 38;
-
-    canvas->fillRect(
-        0,
-        y,
-        SCREEN_W,
-        h,
-        C_BLACK
-    );
-
-    canvas->drawFastHLine(
-        0,
-        y,
-        SCREEN_W,
-        C_GREY
-    );
-
-    // Heading marks every 10 degrees.
-    int base =
-        ((int)heading / 10) * 10;
-
-    for (int offset = -60;
-         offset <= 60;
-         offset += 10)
-    {
-        int hdg =
-            base + offset;
-
-        while (hdg < 0)
-            hdg += 360;
-
-        while (hdg >= 360)
-            hdg -= 360;
-
-        float difference =
-            (base + offset) -
-            heading;
-
-        int px =
-            SCREEN_W / 2 +
-            (int)(difference * 2.0f);
-
-        if (px < 4 ||
-            px > SCREEN_W - 4)
-        {
-            continue;
-        }
-
-        int tickHeight =
-            (hdg % 30 == 0)
-                ? 8
-                : 4;
-
-        canvas->drawFastVLine(
-            px,
-            y,
-            tickHeight,
-            C_WHITE
-        );
-
-        if (hdg % 30 == 0)
-        {
-            char label[8];
-
-            if (hdg == 0)
-                strcpy(label, "N");
-            else if (hdg == 90)
-                strcpy(label, "E");
-            else if (hdg == 180)
-                strcpy(label, "S");
-            else if (hdg == 270)
-                strcpy(label, "W");
-            else
-                snprintf(
-                    label,
-                    sizeof(label),
-                    "%02d",
-                    hdg / 10
-                );
-
-            canvas->setTextSize(1);
-            canvas->setTextColor(C_WHITE);
-
-            canvas->setCursor(
-                px - 3,
-                y + 10
-            );
-
-            canvas->print(label);
-        }
-    }
-
-    // Heading selection box.
-    canvas->fillTriangle(
-        SCREEN_W / 2,
-        y,
-        SCREEN_W / 2 - 5,
-        y + 6,
-        SCREEN_W / 2 + 5,
-        y + 6,
-        PFD_MAGENTA
-    );
-
-    char current[8];
-
-    snprintf(
-        current,
-        sizeof(current),
-        "%03d",
-        (int)heading
-    );
-
-    canvas->fillRect(
-        101,
-        220,
-        38,
-        18,
-        C_BLACK
-    );
-
-    canvas->drawRect(
-        101,
-        220,
-        38,
-        18,
-        PFD_MAGENTA
-    );
-
-    canvas->setTextSize(1);
-    canvas->setTextColor(C_WHITE);
-    canvas->setCursor(
-        111,
-        226
-    );
-    canvas->print(current);
-}
-
-// ============================================================
-// Flight mode annunciator
-// ============================================================
-
-void drawModeAnnunciator()
-{
-    canvas->fillRect(
-        70,
-        2,
-        100,
-        18,
-        C_BLACK
-    );
-
-    canvas->drawRect(
-        70,
-        2,
-        100,
-        18,
-        autopilot
-            ? C_GREEN
-            : C_GREY
-    );
-
-    canvas->setTextSize(1);
-
-    if (autopilot)
-    {
-        canvas->setTextColor(C_GREEN);
-        canvas->setCursor(82, 7);
-        canvas->print("AP  LEVEL");
-    }
-    else
-    {
-        canvas->setTextColor(C_CYAN);
-        canvas->setCursor(82, 7);
-        canvas->print("MANUAL FLT");
-    }
-}
-
-// ============================================================
-// Warning annunciations
-// ============================================================
-
-void drawWarnings()
-{
-    bool excessiveBank =
-        fabsf(bankDeg) > 45.0f;
-
-    bool excessivePitch =
-        fabsf(pitchDeg) > 20.0f;
-
-    if (!excessiveBank &&
-        !excessivePitch)
+    if (millis() -
+            lastButtonTime <
+        250)
     {
         return;
     }
 
-    canvas->fillRect(
-        64,
-        177,
-        112,
-        18,
-        C_RED
+    lastButtonTime =
+        millis();
+
+    int next =
+        ((int)mode + 1) % 3;
+
+    mode =
+        (InstrumentMode)next;
+
+    Serial.printf(
+        "MicroScope mode: %s\n",
+        modeName()
     );
+}
+// ============================================================
+// Scope waveform selection
+// ============================================================
 
-    canvas->setTextSize(1);
-    canvas->setTextColor(C_WHITE);
+void cycleWaveform()
+{
+    int next =
+        ((int)waveType + 1) % 4;
 
-    if (excessiveBank)
+    waveType =
+        (WaveType)next;
+}
+
+// ============================================================
+// Scope measurements
+// ============================================================
+
+void drawScopeMeasurements()
+{
+    // For V1 these measurements correspond to the simulated source.
+    float vpp =
+        signalAmplitude * 2.0f;
+
+    float rms = 0.0f;
+
+    if (waveType == WAVE_SINE)
     {
-        canvas->setCursor(
-            82,
-            183
-        );
-        canvas->print("BANK ANGLE");
+        rms =
+            signalAmplitude *
+            0.7071f;
+    }
+    else if (waveType == WAVE_SQUARE)
+    {
+        rms =
+            signalAmplitude;
+    }
+    else if (waveType == WAVE_TRIANGLE)
+    {
+        rms =
+            signalAmplitude *
+            0.5774f;
     }
     else
     {
-        canvas->setCursor(
-            88,
-            183
-        );
-        canvas->print("PITCH");
+        // Approximate RMS for the noisy simulated source.
+        rms =
+            signalAmplitude *
+            0.62f;
     }
+
+    canvas->fillRect(
+        0,
+        24,
+        SCREEN_W,
+        20,
+        C_BLACK
+    );
+
+    canvas->setTextSize(1);
+
+    canvas->setTextColor(C_GREEN);
+    canvas->setCursor(4, 29);
+    canvas->printf(
+        "F %.0fHz",
+        signalFrequency
+    );
+
+    canvas->setTextColor(C_CYAN);
+    canvas->setCursor(78, 29);
+    canvas->printf(
+        "VPP %.2f",
+        vpp
+    );
+
+    canvas->setTextColor(C_YELLOW);
+    canvas->setCursor(164, 29);
+    canvas->printf(
+        "RMS %.2f",
+        rms
+    );
+}
+
+// ============================================================
+// Scope trigger marker
+// ============================================================
+
+void drawTriggerMarker(
+    int plotTop,
+    int plotBottom)
+{
+    int centreY =
+        (plotTop + plotBottom) / 2;
+
+    float pixelsPerVolt =
+        20.0f /
+        voltsPerDiv;
+
+    int triggerY =
+        centreY -
+        (int)(
+            triggerLevel *
+            pixelsPerVolt
+        );
+
+    triggerY =
+        constrain(
+            triggerY,
+            plotTop + 2,
+            plotBottom - 2
+        );
+
+    // Trigger level marker on right edge.
+    canvas->fillTriangle(
+        239,
+        triggerY,
+        232,
+        triggerY - 4,
+        232,
+        triggerY + 4,
+        C_YELLOW
+    );
+
+    canvas->setTextSize(1);
+    canvas->setTextColor(C_YELLOW);
+    canvas->setCursor(
+        214,
+        triggerY - 10
+    );
+    canvas->print("T");
+}
+
+// ============================================================
+// Scope trace
+// ============================================================
+
+void drawScopeTrace()
+{
+    constexpr int plotLeft = 0;
+    constexpr int plotTop = 44;
+    constexpr int plotRight = 239;
+    constexpr int plotBottom = 217;
+
+    drawGraticule(
+        plotLeft,
+        plotTop,
+        plotRight,
+        plotBottom
+    );
+
+    int centreY =
+        (plotTop + plotBottom) / 2;
+
+    float pixelsPerVolt =
+        20.0f /
+        voltsPerDiv;
+
+    // More time/div means more cycles visible.
+    float cyclesAcrossScreen =
+        1.1f *
+        timePerDivMs;
+
+    cyclesAcrossScreen =
+        clampFloat(
+            cyclesAcrossScreen,
+            0.35f,
+            4.5f
+        );
+
+    int previousX = plotLeft;
+    int previousY = centreY;
+
+    for (int x = plotLeft;
+         x <= plotRight;
+         x++)
+    {
+        float normalizedX =
+            (float)(x - plotLeft) /
+            (float)(plotRight - plotLeft);
+
+        float phase =
+            animationPhase +
+            normalizedX *
+            cyclesAcrossScreen *
+            2.0f *
+            PI;
+
+        float voltage =
+            sampleSignal(phase);
+
+        int y =
+            centreY -
+            (int)(
+                voltage *
+                pixelsPerVolt
+            );
+
+        y =
+            constrain(
+                y,
+                plotTop + 2,
+                plotBottom - 2
+            );
+
+        if (x > plotLeft)
+        {
+            // Dim under-trace gives a tiny persistence/glow effect.
+            canvas->drawLine(
+                previousX,
+                previousY + 1,
+                x,
+                y + 1,
+                TRACE_DIM
+            );
+
+            canvas->drawLine(
+                previousX,
+                previousY,
+                x,
+                y,
+                C_GREEN
+            );
+        }
+
+        previousX = x;
+        previousY = y;
+    }
+
+    drawTriggerMarker(
+        plotTop,
+        plotBottom
+    );
+
+    // Trigger position marker at upper edge.
+    canvas->fillTriangle(
+        120,
+        plotTop + 1,
+        116,
+        plotTop + 7,
+        124,
+        plotTop + 7,
+        C_YELLOW
+    );
+}
+
+// ============================================================
+// Scope control indicator
+// ============================================================
+
+void drawScopeControlHints()
+{
+    // Tiny vertical scale arrows.
+    canvas->setTextSize(1);
+    canvas->setTextColor(C_GREY);
+
+    canvas->setCursor(3, 205);
+    canvas->print("Y:V/D");
+
+    canvas->setCursor(190, 205);
+    canvas->print("X:T/D");
+}
+
+// ============================================================
+// Complete scope mode
+// ============================================================
+
+void drawScopeMode()
+{
+    canvas->fillScreen(C_BLACK);
+
+    drawHeader();
+    drawScopeMeasurements();
+    drawScopeTrace();
+    drawScopeControlHints();
+    drawFooter();
+
+    canvas->flush();
+}
+
+// ============================================================
+// Spectrum generator
+// ============================================================
+
+void updateSpectrumData()
+{
+    // Dominant simulated frequency mapped into 32 bins over 0-10 kHz.
+    float dominantBin =
+        signalFrequency /
+        10000.0f *
+        (SPECTRUM_BINS - 1);
+
+    for (int i = 0;
+         i < SPECTRUM_BINS;
+         i++)
+    {
+        float distance =
+            fabsf(
+                i -
+                dominantBin
+            );
+
+        float fundamental =
+            expf(
+                -distance *
+                distance *
+                0.72f
+            );
+
+        // Harmonics make square/triangle modes visually distinct.
+        float harmonic2 = 0.0f;
+        float harmonic3 = 0.0f;
+
+        float bin2 =
+            dominantBin * 2.0f;
+
+        float bin3 =
+            dominantBin * 3.0f;
+
+        if (bin2 <
+            SPECTRUM_BINS)
+        {
+            float d =
+                fabsf(
+                    i -
+                    bin2
+                );
+
+            harmonic2 =
+                expf(
+                    -d * d *
+                    0.85f
+                );
+        }
+
+        if (bin3 <
+            SPECTRUM_BINS)
+        {
+            float d =
+                fabsf(
+                    i -
+                    bin3
+                );
+
+            harmonic3 =
+                expf(
+                    -d * d *
+                    0.85f
+                );
+        }
+
+        float value =
+            fundamental *
+            signalAmplitude;
+
+        if (waveType ==
+            WAVE_SQUARE)
+        {
+            value +=
+                harmonic3 *
+                signalAmplitude *
+                0.34f;
+        }
+        else if (waveType ==
+                 WAVE_TRIANGLE)
+        {
+            value +=
+                harmonic3 *
+                signalAmplitude *
+                0.12f;
+        }
+        else if (waveType ==
+                 WAVE_NOISE)
+        {
+            value +=
+                random(5, 35) /
+                100.0f;
+        }
+        else
+        {
+            value +=
+                harmonic2 *
+                signalAmplitude *
+                0.06f;
+        }
+
+        // Slight animated noise floor.
+        value +=
+            random(0, 10) /
+            100.0f;
+
+        spectrum[i] =
+            clampFloat(
+                value,
+                0.0f,
+                2.2f
+            );
+
+        // Peak hold decays slowly.
+        if (spectrum[i] >
+            spectrumPeak[i])
+        {
+            spectrumPeak[i] =
+                spectrum[i];
+        }
+        else
+        {
+            spectrumPeak[i] -=
+                0.012f;
+
+            if (spectrumPeak[i] < 0)
+                spectrumPeak[i] = 0;
+        }
+    }
+}
+
+// ============================================================
+// Spectrum measurements
+// ============================================================
+
+void drawSpectrumMeasurements()
+{
+    canvas->fillRect(
+        0,
+        24,
+        SCREEN_W,
+        20,
+        C_BLACK
+    );
+
+    canvas->setTextSize(1);
+
+    canvas->setTextColor(C_GREEN);
+    canvas->setCursor(4, 29);
+    canvas->printf(
+        "PEAK %.0fHz",
+        signalFrequency
+    );
+
+    canvas->setTextColor(C_CYAN);
+    canvas->setCursor(106, 29);
+    canvas->printf(
+        "AMP %.2fV",
+        signalAmplitude
+    );
+
+    canvas->setTextColor(C_YELLOW);
+    canvas->setCursor(190, 29);
+    canvas->print("HOLD");
+}
+
+// ============================================================
+// Spectrum renderer
+// ============================================================
+
+void drawSpectrumMode()
+{
+    constexpr int plotLeft = 4;
+    constexpr int plotTop = 44;
+    constexpr int plotRight = 235;
+    constexpr int plotBottom = 217;
+
+    canvas->fillScreen(C_BLACK);
+
+    drawHeader();
+    drawSpectrumMeasurements();
+
+    drawGraticule(
+        plotLeft,
+        plotTop,
+        plotRight,
+        plotBottom
+    );
+
+    updateSpectrumData();
+
+    int plotHeight =
+        plotBottom -
+        plotTop -
+        4;
+
+    int availableWidth =
+        plotRight -
+        plotLeft -
+        4;
+
+    int barWidth =
+        max(
+            2,
+            availableWidth /
+            SPECTRUM_BINS
+        );
+
+    int dominantIndex = 0;
+    float dominantValue = 0.0f;
+
+    for (int i = 0;
+         i < SPECTRUM_BINS;
+         i++)
+    {
+        if (spectrum[i] >
+            dominantValue)
+        {
+            dominantValue =
+                spectrum[i];
+
+            dominantIndex = i;
+        }
+
+        float normalized =
+            spectrum[i] /
+            2.2f;
+
+        normalized =
+            clampFloat(
+                normalized,
+                0.0f,
+                1.0f
+            );
+
+        int barHeight =
+            (int)(
+                normalized *
+                plotHeight
+            );
+
+        int x =
+            plotLeft +
+            2 +
+            i *
+            availableWidth /
+            SPECTRUM_BINS;
+
+        int y =
+            plotBottom -
+            2 -
+            barHeight;
+
+        uint16_t colour;
+
+        if (normalized > 0.72f)
+            colour = C_YELLOW;
+        else if (normalized > 0.38f)
+            colour = C_CYAN;
+        else
+            colour = C_GREEN;
+
+        canvas->fillRect(
+            x,
+            y,
+            barWidth,
+            barHeight,
+            colour
+        );
+
+        // Peak-hold marker.
+        float peakNormalized =
+            spectrumPeak[i] /
+            2.2f;
+
+        peakNormalized =
+            clampFloat(
+                peakNormalized,
+                0.0f,
+                1.0f
+            );
+
+        int peakY =
+            plotBottom -
+            2 -
+            (int)(
+                peakNormalized *
+                plotHeight
+            );
+
+        canvas->drawFastHLine(
+            x,
+            peakY,
+            barWidth,
+            C_WHITE
+        );
+    }
+
+    // Dominant-frequency cursor.
+    int dominantX =
+        plotLeft +
+        2 +
+        dominantIndex *
+        availableWidth /
+        SPECTRUM_BINS;
+
+    canvas->drawFastVLine(
+        dominantX,
+        plotTop + 2,
+        8,
+        C_MAGENTA
+    );
+
+    canvas->fillTriangle(
+        dominantX,
+        plotTop + 11,
+        dominantX - 4,
+        plotTop + 5,
+        dominantX + 4,
+        plotTop + 5,
+        C_MAGENTA
+    );
+
+    drawFooter();
+
+    canvas->flush();
+}
+
+// ============================================================
+// XY / Lissajous renderer
+// ============================================================
+
+void drawXYMode()
+{
+    constexpr int plotLeft = 10;
+    constexpr int plotTop = 34;
+    constexpr int plotRight = 229;
+    constexpr int plotBottom = 217;
+
+    canvas->fillScreen(C_BLACK);
+
+    drawHeader();
+
+    drawGraticule(
+        plotLeft,
+        plotTop,
+        plotRight,
+        plotBottom
+    );
+
+    int centreX =
+        (plotLeft +
+         plotRight) / 2;
+
+    int centreY =
+        (plotTop +
+         plotBottom) / 2;
+
+    float radiusX =
+        (plotRight -
+         plotLeft) *
+        0.42f;
+
+    float radiusY =
+        (plotBottom -
+         plotTop) *
+        0.42f;
+
+    int previousX = centreX;
+    int previousY = centreY;
+
+    constexpr int points = 260;
+
+    for (int i = 0;
+         i < points;
+         i++)
+    {
+        float t =
+            animationPhase +
+            i *
+            (2.0f * PI /
+             points) *
+            2.0f;
+
+        float sx =
+            sinf(t);
+
+        float sy =
+            sinf(
+                t *
+                xyRatio +
+                xyPhaseShift
+            );
+
+        int x =
+            centreX +
+            (int)(
+                sx *
+                radiusX
+            );
+
+        int y =
+            centreY +
+            (int)(
+                sy *
+                radiusY
+            );
+
+        if (i > 0)
+        {
+            // Dim companion trace.
+            canvas->drawLine(
+                previousX + 1,
+                previousY,
+                x + 1,
+                y,
+                TRACE_DIM
+            );
+
+            canvas->drawLine(
+                previousX,
+                previousY,
+                x,
+                y,
+                C_CYAN
+            );
+        }
+
+        previousX = x;
+        previousY = y;
+    }
+
+    // Centre reference.
+    canvas->drawCircle(
+        centreX,
+        centreY,
+        3,
+        C_YELLOW
+    );
+
+    canvas->drawPixel(
+        centreX,
+        centreY,
+        C_WHITE
+    );
+
+    // XY mode labels.
+    canvas->setTextSize(1);
+
+    canvas->setTextColor(C_GREEN);
+    canvas->setCursor(15, 40);
+    canvas->print("CH1 X");
+
+    canvas->setTextColor(C_MAGENTA);
+    canvas->setCursor(190, 40);
+    canvas->print("Y CH2");
+
+    drawFooter();
+
+    canvas->flush();
 }
 // ============================================================
 // Startup / self-test
@@ -1328,28 +1563,28 @@ void drawStartupScreen()
 
     centredText(
         "FORGEUI",
-        52,
+        50,
         3,
         C_CYAN
     );
 
     centredText(
-        "MICROPILOT",
-        88,
+        "MICROSCOPE",
+        86,
         2,
         C_WHITE
     );
 
     centredText(
-        "PRIMARY FLIGHT DISPLAY",
+        "DIGITAL INSTRUMENT",
         120,
         1,
         C_GREY
     );
 
     centredText(
-        "ESP32-S3 // ST7789",
-        143,
+        "SCOPE // FFT // XY",
+        144,
         1,
         C_WHITE
     );
@@ -1362,7 +1597,7 @@ void drawStartupScreen()
     );
 
     centredText(
-        "PFD READY",
+        "INSTRUMENT READY",
         198,
         1,
         C_GREEN
@@ -1372,92 +1607,169 @@ void drawStartupScreen()
 }
 
 // ============================================================
-// PFD renderer
+// Waveform selector
+//
+// In SCOPE mode a long-ish joystick-button hold changes
+// waveform. A normal press cycles instrument mode.
 // ============================================================
 
-void drawPFD()
-{
-    // Moving attitude layer.
-    drawHorizonBackground();
-    drawPitchLadder();
-
-    // Fixed flight instrumentation.
-    drawRollScale();
-    drawAircraftSymbol();
-
-    drawAirspeedTape();
-    drawAltitudeTape();
-    drawVerticalSpeed();
-    drawHeadingStrip();
-
-    drawModeAnnunciator();
-    drawWarnings();
-
-    // Small ForgeUI identity.
-    canvas->fillRect(
-        2,
-        2,
-        61,
-        17,
-        C_BLACK
-    );
-
-    canvas->drawRect(
-        2,
-        2,
-        61,
-        17,
-        C_CYAN
-    );
-
-    canvas->setTextSize(1);
-    canvas->setTextColor(C_CYAN);
-
-    canvas->setCursor(
-        8,
-        7
-    );
-
-    canvas->print("FORGEUI");
-
-    canvas->flush();
-}
-
-// ============================================================
-// Autopilot button
-// ============================================================
-
-void updateAutopilotButton()
+void handleButton()
 {
     static bool previousButton = false;
+    static unsigned long pressStart = 0;
 
     bool currentButton =
         buttonPressed();
 
-    bool pressedEdge =
-        currentButton &&
-        !previousButton;
+    // New press.
+    if (currentButton &&
+        !previousButton)
+    {
+        pressStart = millis();
+    }
+
+    // Release.
+    if (!currentButton &&
+        previousButton)
+    {
+        unsigned long held =
+            millis() -
+            pressStart;
+
+        if (millis() -
+                lastButtonTime >=
+            250)
+        {
+            lastButtonTime =
+                millis();
+
+            // Hold >= 700 ms in scope mode:
+            // change generated waveform.
+            if (mode == MODE_SCOPE &&
+                held >= 700)
+            {
+                cycleWaveform();
+
+                Serial.printf(
+                    "Waveform: %s\n",
+                    waveName()
+                );
+            }
+            else
+            {
+                int next =
+                    ((int)mode + 1) %
+                    3;
+
+                mode =
+                    (InstrumentMode)next;
+
+                Serial.printf(
+                    "MicroScope mode: %s\n",
+                    modeName()
+                );
+            }
+        }
+    }
 
     previousButton =
         currentButton;
+}
 
-    if (!pressedEdge)
-        return;
+// ============================================================
+// Scope animated trigger / signal behaviour
+// ============================================================
 
-    // Debounce.
-    if (millis() - lastButtonTime < 250)
-        return;
+void updateSimulatedInstrument()
+{
+    // Advance animation.
+    //
+    // Scope intentionally moves more slowly than the actual
+    // simulated signal frequency so the waveform remains
+    // visually readable rather than becoming a blur.
+    animationPhase += 0.075f;
 
-    lastButtonTime = millis();
+    if (animationPhase >
+        2.0f * PI)
+    {
+        animationPhase -=
+            2.0f * PI;
+    }
 
-    autopilot = !autopilot;
+    // Slowly animate trigger level for visual instrumentation.
+    if (mode == MODE_SCOPE)
+    {
+        triggerLevel =
+            sinf(
+                millis() *
+                0.0007f
+            ) *
+            0.30f;
+    }
+}
 
-    Serial.printf(
-        "Autopilot: %s\n",
-        autopilot
-            ? "ON"
-            : "OFF"
+// ============================================================
+// Small mode overlay
+// ============================================================
+
+void drawModeHint()
+{
+    canvas->fillRect(
+        74,
+        205,
+        92,
+        11,
+        C_BLACK
     );
+
+    canvas->setTextSize(1);
+    canvas->setTextColor(C_GREY);
+
+    canvas->setCursor(
+        79,
+        207
+    );
+
+    if (mode == MODE_SCOPE)
+    {
+        canvas->print(
+            "HOLD: WAVE"
+        );
+    }
+    else
+    {
+        canvas->print(
+            "PRESS: MODE"
+        );
+    }
+}
+
+// ============================================================
+// Render dispatcher
+// ============================================================
+
+void renderInstrument()
+{
+    switch (mode)
+    {
+        case MODE_SCOPE:
+        {
+            drawScopeMode();
+            break;
+        }
+
+        case MODE_SPECTRUM:
+        {
+            drawSpectrumMode();
+            break;
+        }
+
+        case MODE_XY:
+        {
+            drawXYMode();
+            break;
+        }
+    }
 }
 
 // ============================================================
@@ -1470,12 +1782,24 @@ void setup()
     delay(300);
 
     Serial.println();
-    Serial.println("==============================");
-    Serial.println("FORGEUI MICROPILOT");
-    Serial.println("PRIMARY FLIGHT DISPLAY");
-    Serial.println("ESP32-S3 + ST7789 240x240");
-    Serial.println("JOY X=6 Y=5 SW=4");
-    Serial.println("==============================");
+    Serial.println(
+        "=============================="
+    );
+    Serial.println(
+        "FORGEUI MICROSCOPE"
+    );
+    Serial.println(
+        "ESP32-S3 + ST7789 240x240"
+    );
+    Serial.println(
+        "SCOPE // SPECTRUM // XY"
+    );
+    Serial.println(
+        "JOY X=6 Y=5 SW=4"
+    );
+    Serial.println(
+        "=============================="
+    );
 
     pinMode(
         JOY_SW,
@@ -1514,33 +1838,49 @@ void setup()
             delay(1000);
     }
 
+    randomSeed(
+        analogRead(JOY_X) ^
+        analogRead(JOY_Y) ^
+        micros()
+    );
+
+    // Initialise spectrum state.
+    for (int i = 0;
+         i < SPECTRUM_BINS;
+         i++)
+    {
+        spectrum[i] = 0.0f;
+        spectrumPeak[i] = 0.0f;
+    }
+
     drawStartupScreen();
 
-    delay(1600);
+    delay(1500);
 
     calibrateJoystick();
 
-    delay(500);
+    delay(400);
 
-    // Initial simulated flight condition.
-    bankDeg = 0.0f;
-    pitchDeg = 0.0f;
+    mode = MODE_SCOPE;
+    waveType = WAVE_SINE;
 
-    commandedBank = 0.0f;
-    commandedPitch = 0.0f;
+    voltsPerDiv = 1.0f;
+    timePerDivMs = 1.0f;
+    triggerLevel = 0.0f;
 
-    airspeed = 105.0f;
-    altitude = 2450.0f;
-    verticalSpeed = 0.0f;
-    heading = 270.0f;
+    signalFrequency = 1000.0f;
+    signalAmplitude = 1.25f;
+    signalOffset = 0.0f;
 
-    autopilot = false;
+    xyPhaseShift = PI / 2.0f;
+    xyRatio = 1.0f;
 
     Serial.println(
-        "MICROPILOT PFD READY"
+        "MICROSCOPE READY"
     );
 
-    // Prevent held switch during calibration from toggling AP.
+    // Prevent held switch during calibration
+    // becoming an immediate mode change.
     while (buttonPressed())
         delay(10);
 }
@@ -1552,14 +1892,21 @@ void setup()
 void loop()
 {
     // Approximately 30 FPS.
-    if (millis() - lastFrame < 33)
+    if (millis() -
+            lastFrame <
+        33)
+    {
         return;
+    }
 
-    lastFrame = millis();
+    lastFrame =
+        millis();
 
-    updateAutopilotButton();
+    handleButton();
 
-    updateFlightModel();
+    updateControls();
 
-    drawPFD();
+    updateSimulatedInstrument();
+
+    renderInstrument();
 }

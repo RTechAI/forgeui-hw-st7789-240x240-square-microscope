@@ -1,7 +1,7 @@
 ---
-name: MicroPilot hardware or PFD issue
-about: Report a ForgeUI MicroPilot hardware, control, build, or flight-display problem
-title: "[MicroPilot] "
+name: MicroScope hardware or instrument issue
+about: Report a ForgeUI MicroScope hardware, control, build, or instrument-rendering problem
+title: "[MicroScope] "
 labels: hardware
 assignees: ""
 ---
@@ -38,20 +38,21 @@ State whether MISO is connected. For the tested 1.54-inch square module, BLK is 
 | GND | |
 
 - Observed centre calibration values (`Joystick centre X=... Y=...`):
-- Bank response:
-- Pitch response:
 
-## MicroPilot PFD behavior
+## Current instrument behaviour
 
-- Artificial-horizon behavior:
-- Pitch-ladder behavior:
-- IAS behavior:
-- Altitude behavior:
-- Vertical-speed behavior:
-- Heading behavior:
-- AP LEVEL toggle behavior:
-- Autopilot levelling behavior:
-- Warning annunciations (bank/pitch):
+- Current mode (SCOPE / SPECTRUM / XY):
+- SCOPE waveform type:
+- SCOPE trace behaviour:
+- Volts/div behaviour:
+- Time/div behaviour:
+- Trigger-level and trigger-position display:
+- Simulated measurement readouts (frequency / Vpp / RMS):
+- SPECTRUM rendering:
+- Peak-hold behaviour:
+- XY/Lissajous rendering:
+- XY phase/ratio behaviour:
+- Mode-switching behaviour:
 
 ## Software and results
 

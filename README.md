@@ -1,61 +1,59 @@
-# ForgeUI MicroPilot — ESP32-S3 + ST7789 240×240
+# ForgeUI MicroScope — ESP32-S3 + ST7789 240×240
 
-ForgeUI MicroPilot is a physically tested joystick-controlled miniature Primary Flight Display (PFD) / glass-cockpit graphics showcase. It runs on an ESP32-S3 DevKitC-1 with a 1.54-inch ST7789 square SPI TFT at its native 240×240 resolution, and is built on the proven ForgeUI ST7789 240×240 square-display baseline.
+ForgeUI MicroScope V1 is a physically tested miniature instrumentation and graphics showcase for an ESP32-S3 DevKitC-1, a 1.54-inch ST7789 square SPI TFT at its native 240×240 resolution, and an analogue joystick with push switch. It builds on the physically proven ForgeUI ST7789 240×240 square-display baseline.
 
-![Physical ForgeUI MicroPilot PFD running on the tested hardware](Splash2.png)
+![Temporary physical evidence: ForgeUI MicroScope SCOPE mode on the tested hardware](Splash2.png)
 
-## PHYSICAL DISPLAY / MICROPILOT PASS
+## Important: V1 uses simulated signals
 
-MicroPilot has been physically run on the stated ESP32-S3 and ST7789 hardware.
+**MicroScope V1 does not sample an external analogue input. Its waveform, measurements, spectrum data, and XY signals are internally generated/simulated.** It is a graphics and instrumentation showcase, not a real oscilloscope measurement instrument.
+
+## Physical graphics pass
+
+MicroScope has been physically run on the stated ESP32-S3 and ST7789 hardware.
 
 - Firmware build and flash: PASS
-- ST7789 initialization and full 240×240 rendering: PASS
-- Joystick calibration and control: PASS
-- MicroPilot startup/self-test and PFD operation: PASS
-- Artificial horizon, pitch ladder, flight tapes, heading, and AP LEVEL annunciation: PASS
+- ST7789 initialisation and full 240×240 rendering: PASS
+- Joystick input: operational
+- ForgeUI MicroScope graphics, graticule, animated traces, and instrumentation readouts: physically rendered
 
-## MicroPilot overview
+The current night photographs are temporary physical evidence; improved daylight photographs will be added later.
 
-MicroPilot renders an animated PFD with a simulated aircraft attitude and flight data. The joystick commands bank and pitch in manual flight; AP LEVEL smoothly commands the simulated aircraft back to wings-level, zero-pitch flight.
+## Instrument modes
+
+The joystick button cycles `SCOPE → SPECTRUM → XY → SCOPE`. The firmware provides a ForgeUI instrument header and mode-specific readouts/footer in each mode.
+
+### SCOPE
+
+SCOPE renders an internally generated sine, square, triangle, or noisy waveform. It includes an animated trace, oscilloscope-style graticule, trigger-level marker, trigger-position marker, volts/div, time/div, frequency, Vpp, RMS, and a dim persistence/glow companion trace.
+
+The frequency, Vpp, and RMS values correspond to the simulated/generated source; they are not measurements of an external signal.
+
+### SPECTRUM
+
+SPECTRUM is a **simulated/generated spectrum visualisation**, not an FFT. It renders 32 generated spectrum bins with simulated harmonic content, an animated noise floor, peak-hold markers, and a dominant-bin cursor. Its peak-frequency and amplitude readouts correspond to the generated source.
+
+### XY / Lissajous
+
+XY renders a source-verified animated XY/Lissajous-style trace with a graticule, centre reference, phase readout, and ratio readout. Current photos do not yet provide physical photographic proof of XY mode.
 
 ## Controls
 
-| Joystick input | Action |
-| --- | --- |
-| Left / right | Command bank |
-| Forward / back | Command pitch |
-| Push switch | Toggle AP LEVEL |
+| Mode | Joystick X | Joystick Y | Button |
+| --- | --- | --- | --- |
+| Any | Mode-specific control | Mode-specific control | Normal release cycles `SCOPE → SPECTRUM → XY → SCOPE` |
+| SCOPE | Time/div | Volts/div | Hold for ≥700 ms, then release, to change generated waveform |
+| SPECTRUM | Generated source frequency | Generated source amplitude | Normal release changes mode |
+| XY | Phase | Frequency ratio | Normal release changes mode |
 
-With AP LEVEL enabled, the firmware smoothly returns commanded bank and pitch to zero.
+## Verified common features
 
-## Artificial-horizon / PFD feature set
-
-- ForgeUI MicroPilot startup/self-test
-- 64-sample joystick-centre calibration with a 180-unit dead zone
-- Smooth manual bank and pitch response
-- Animated blue-sky and brown-ground artificial horizon responsive to bank and pitch
-- Moving, rotating pitch ladder; fixed aircraft reference symbol; roll scale; and moving bank pointer
-- IAS tape and current IAS box, altitude tape and current altitude box, and vertical-speed indicator
-- Heading strip and current heading, with simulated heading response to bank
-- Simulated vertical-speed response to pitch, altitude, and airspeed
-- MANUAL FLT and AP LEVEL annunciations, plus excessive-bank and excessive-pitch warnings
-- ForgeUI identity panel, full-resolution 240×240 `Arduino_Canvas` rendering, and an approximately 30 FPS target loop
-
-## Autopilot behavior
-
-The joystick push switch toggles AP LEVEL with button debounce. In AP LEVEL, the simulated aircraft smoothly commands wings-level and zero-pitch attitude. In manual flight, joystick X commands bank and joystick Y commands pitch.
-
-## Physical joystick mapping
-
-| Joystick | ESP32-S3 |
-| --- | --- |
-| SW | GPIO4 |
-| VRy | GPIO5 |
-| VRx | GPIO6 |
-| +5V-labelled supply | 3.3V |
-| GND | GND |
-
-GPIO7 remains spare.
+- ForgeUI MicroScope startup/self-test
+- 64-sample joystick-centre calibration
+- 180-unit joystick dead zone
+- Full-resolution 240×240 `Arduino_Canvas`
+- Approximately 30 FPS target loop
+- Mode switching and mode-specific readouts
 
 ## Hardware
 
@@ -65,7 +63,7 @@ GPIO7 remains spare.
 - PCB marking: `1.54TFT-SPI-ST7789 Ver:1.1`
 - Input: analogue joystick with push switch
 
-## Display + joystick wiring
+### Display and joystick wiring
 
 | ST7789 | ESP32-S3 |
 | --- | --- |
@@ -78,13 +76,23 @@ GPIO7 remains spare.
 | CS | GPIO8 |
 | BLK | 3.3V |
 
-MISO is unused. **BLK → 3.3V is physically proven for this tested square module only; do not automatically generalize that connection to other ST7789 modules.**
+MISO is unused. **BLK → 3.3V is physically proven for this specific module only; do not generalise that connection to every ST7789 module.**
+
+| Joystick | ESP32-S3 |
+| --- | --- |
+| SW | GPIO4 |
+| VRy | GPIO5 |
+| VRx | GPIO6 |
+| +5V-labelled supply | 3.3V |
+| GND | GND |
+
+GPIO7 remains spare.
 
 ## Proven display configuration
 
-The firmware uses Arduino_GFX with ESP32 HSPI, CS on GPIO8, and an ST7789 configured for a 240×240 viewport. It renders through a full-resolution `Arduino_Canvas` before flushing to the display.
+The firmware uses Arduino_GFX with ESP32 HSPI, CS on GPIO8, and an ST7789 configured for a 240×240 viewport. Rendering uses a full-resolution `Arduino_Canvas` before each display flush.
 
-## Software/build baseline
+## Software and build baseline
 
 - PlatformIO
 - `espressif32@6.7.0`
@@ -92,11 +100,7 @@ The firmware uses Arduino_GFX with ESP32 HSPI, CS on GPIO8, and an ST7789 config
 - Arduino framework
 - Arduino_GFX `1.3.7`
 
-Arduino_GFX is deliberately pinned to 1.3.7 because a newer unpinned version produced an `esp32-hal-periman.h` compatibility failure in this environment. The physically tested build can emit internal `SPI_MAX_PIXELS_AT_ONCE` redefinition warnings from the pinned dependency and still succeeds.
-
-## Build and flash
-
-Use PlatformIO with the pinned project configuration:
+Arduino_GFX is deliberately pinned to 1.3.7 because a newer unpinned version produced an `esp32-hal-periman.h` compatibility failure in this environment. The pinned dependency can emit internal `SPI_MAX_PIXELS_AT_ONCE` redefinition warnings while the build still succeeds.
 
 ```sh
 pio run
@@ -106,31 +110,31 @@ pio device monitor
 
 ## Physical validation record
 
-The current images are retained as physical evidence while improved final photographs are prepared.
-
-| Image | Evidence |
+| Image | Use |
 | --- | --- |
-| [Splash1.png](Splash1.png) | MicroPilot startup/calibration physical evidence |
-| [Splash2.png](Splash2.png) | Primary current MicroPilot PFD evidence and temporary README hero |
-| [Splash3.png](Splash3.png) | Additional MicroPilot PFD physical evidence |
-| [splash-st7789-240x240-square.png](splash-st7789-240x240-square.png) | Underlying ST7789 square-display bring-up evidence only |
+| [Splash1.png](Splash1.png) | Temporary physical SPECTRUM-mode evidence |
+| [Splash2.png](Splash2.png) | Temporary physical SCOPE-mode evidence and README hero |
+| [Splash3.png](Splash3.png) | Additional temporary physical SCOPE-mode evidence |
+| [splash-st7789-240x240-square.png](splash-st7789-240x240-square.png) | Supporting golden ST7789 display bring-up evidence only; not MicroScope evidence |
 
-## Related golden square-display reference
+## Golden hardware reference and ForgeUI
 
-[forgeui-hw-st7789-240x240-square](https://github.com/RTechAI/forgeui-hw-st7789-240x240-square) is the golden ForgeUI hardware reference for this physically proven square-display configuration. MicroPilot is an application/showcase built on that baseline.
-
-## ForgeUI Hardware Lab
+[forgeui-hw-st7789-240x240-square](https://github.com/RTechAI/forgeui-hw-st7789-240x240-square) is the golden ForgeUI hardware reference for this physically proven square-display configuration. MicroScope is an application/showcase built on that baseline.
 
 This project is part of the [ForgeUI](https://forgeui.co.nz) Hardware Lab. [ForgeUI Studio](https://studio.forgeui.co.nz) provides the broader ForgeUI interface-design context.
 
-## External dependency and reference attribution
+## Attribution and license
 
-[Arduino_GFX](https://github.com/moononournation/Arduino_GFX) is an independently owned and licensed external dependency; it retains its own copyright and license.
+[Arduino_GFX](https://github.com/moononournation/Arduino_GFX) is an independently owned and licensed external dependency; it retains its own copyright and licence.
 
-The independent [kursatEcinni/esp32s3-st7789-test](https://github.com/kursatEcinni/esp32s3-st7789-test) repository was reference material during the initial ST7789 investigation. ForgeUI does not own that repository, and this project does not copy its branding or LVGL demo material.
+The independent [kursatEcinni/esp32s3-st7789-test](https://github.com/kursatEcinni/esp32s3-st7789-test) repository was reference material during the initial ST7789 investigation. ForgeUI does not own that project.
 
-## License and repository scope
+ForgeUI-authored repository content is released under the [MIT License](LICENSE). Third-party software remains subject to its respective licences.
 
-This repository documents a physically tested MicroPilot implementation for the stated ESP32-S3 board, display module, wiring, and joystick mapping. Validate other modules, board revisions, and wiring independently.
+## Future work
 
-ForgeUI-authored content is released under the [MIT License](LICENSE). Third-party software remains subject to its respective licenses.
+A future version may investigate a safe external ADC-input direction. That work is not implemented in MicroScope V1.
+
+## Known future wording correction
+
+The physically proven runtime startup screen currently says `SCOPE // FFT // XY`. This is only a wording issue: the current SPECTRUM mode is generated/simulated and is not an FFT. A future runtime change should replace that text with `SCOPE // SPECTRUM // XY`.
